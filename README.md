@@ -172,4 +172,4 @@ map %>% ggmap() +
     geom_point(data = addresses, aes(x = long, y = lat), color = "navy", size = 1)
 ```
 
-![](Notebook_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
