@@ -1,0 +1,121 @@
+---
+title: "sac_cc_districts"
+output: github_document
+---
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(sf)
+library(tidygeocoder)
+library(tidyverse)
+library(ggmap)
+setwd("~/coding/sac_cc_districts")
+```
+
+**Locating City Council District based on Address**
+
+This is a notebook I created to locate city council districts given an address. 
+It's meant to work with downloaded data from Action Network. 
+
+This work was done for [Sac Kids First](https://sackidsfirst.org/). 
+
+### Read in Council District KML Data 
+
+This dataset is from [Sacramento Open Data](https://data.cityofsacramento.org). 
+It's very well maintained! I'm using the `sf` package to read it in. 
+
+```{r}
+cc <- st_read("Council_Districts.kml")
+cc[1]
+```
+
+
+### Load in Addresses, Convert to Coordinates (Geocoding)
+
+Now we're loading in a bunch of random addresses I picked from around the Sacramento region.
+It's in the same format from Action Network so it should work with the activist data.
+On the second line, I use Regular Expressions (Regex) to remove apartment/unit numbers which 
+can create problems.
+
+```{r}
+addresses <- read.csv('test.csv')
+
+# (?i) - case insenstive match
+addresses$address <- gsub("(\\#|(?i)apt|(?i)unit).*", "", 
+                               addresses$address, perl=TRUE)
+#remove commas & periods
+addresses$address <- gsub("(\\,|\\.)", "", 
+                               addresses$address, perl=TRUE)
+
+addresses <- addresses %>% 
+  mutate(full_address = paste(address, city, state, zip_code, sep=", ")) 
+```
+
+We then use `geocode` from `tinygeocoder`. It's a very handy function and easy to use. 
+Here is the result. Note that some places are outside of the city limits. 
+
+```{r message=FALSE, warning=FALSE}
+addresses  <- tidygeocoder::geocode(addresses %>% select(name, full_address), full_address, method = "osm")
+addresses 
+```
+
+### Find CC District based on Address
+
+Now we use st_intersecs to find out which addresss is in which district. 
+
+```{r}
+pnts = addresses %>% select(long, lat)
+
+address_sf <- do.call("st_sfc",c(lapply(1:nrow(pnts), 
+function(i) {st_point(as.numeric(pnts[i, ]))}), list("crs" = 4326))) 
+
+address_trans <- st_transform(address_sf, 2163) # apply transformation to pnts sf
+cc_trans <- st_transform(cc[1], 2163)      # apply transformation to polygons sf
+
+# intersect and extract state name
+addresses$council_member <- apply(st_intersects(cc_trans, address_trans, sparse = FALSE), 2, 
+               function(col) { 
+                  cc_trans[which(col), ]$Name
+               }) %>% as.character()
+
+```
+
+
+We create a small dataframe to match each council member to a district number. 
+
+```{r}
+districts = data.frame(council_member = c("Angelique Ashby", "Sean Loloee", 
+                                          "Jeff Harris", "Katie Valenzuela", 
+                                          "Jay Schenirer", "Eric Guerra",  
+                                            "Rick Jennings II", "Mai Vang"), 
+         cc_district = 1:8)
+```
+
+Now we left_join the data frame above and we have our result!
+Note that the following places are outside of the city limits so has no council district:
+
+* 99 Ranch (off of highway 99 - not in city limits)
+* Kingdom Coffee Roasters (Folsom)
+* Temple Coffee (Arden)
+
+```{r message = FALSE}
+addresses %>% select(name, full_address, council_member) %>% 
+            left_join(districts)
+```
+
+### Plotting the Results
+
+Here I download the basemap for the Sacramento region. 
+```{r}
+map <- get_googlemap("Sacramento, California", zoom = 11, maptype = "roadmap")
+```
+
+Using ggmap, I map the layers along with the addresses!
+Woo hoo! 
+
+```{r fig.width=8, fig.height=10,  fig.fullwidth=TRUE, message=FALSE, warning=FALSE}
+map %>% ggmap() + 
+    geom_sf(data = cc[1], 
+            aes(fill = Name),
+             inherit.aes = FALSE, alpha=0.5)  +
+    geom_point(data = addresses, aes(x = long, y = lat), color = "navy", size = 1)
+```
+
